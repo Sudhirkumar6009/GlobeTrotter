@@ -1166,7 +1166,7 @@ const Itinerary = () => {
                           description: description.trim() || undefined,
                           startTime: startTime || undefined,
                           endTime: endTime || undefined,
-                          visibility: "private" as const,
+                          visibility: visibility || "private",
                         };
 
                         console.log(

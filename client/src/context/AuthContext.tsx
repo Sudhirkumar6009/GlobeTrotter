@@ -41,6 +41,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const normalizeUser = (data: UserData | null): UserData | null => {
     if (!data) return null;
+    // Ensure we always have a stable id field (backend /me returns _id whereas login/signup return id)
+    // @ts-ignore - allow reading _id if present
+    const backendId = (data as any).id || (data as any)._id;
+    if (!data.id && backendId) {
+      // Create a shallow clone with id injected for consistency across app
+      data = { ...(data as any), id: backendId } as UserData;
+    }
     if (!data.firstName && !data.lastName && data.name) {
       const parts = data.name.trim().split(/\s+/);
       const firstName = parts.shift() || "";

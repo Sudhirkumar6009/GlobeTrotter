@@ -32,15 +32,6 @@ import {
 import heroTravelImage from "@/assets/hero-travel.jpg";
 import { useAuth } from "@/context/AuthContext";
 
-// Removed mockTrips: real trips loaded from backend via TripContext
-
-const topDestinations = [
-  { name: "Bali, Indonesia", trips: 234, trending: true },
-  { name: "Santorini, Greece", trips: 189, trending: false },
-  { name: "Tokyo, Japan", trips: 167, trending: true },
-  { name: "Iceland", trips: 145, trending: false },
-];
-
 interface DashboardProps {
   guestMode?: boolean;
 }
@@ -53,6 +44,7 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
     reloadTrips,
     loading: tripsLoading,
     error: tripsError,
+    loaded,
   } = useTrips(); // replaced destructure
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -97,11 +89,11 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
   }, [navigate]);
 
   useEffect(() => {
-    // After user verified, if no trips yet and not already loading, force reload
-    if (!guestMode && userData && !tripsLoading && trips.length === 0) {
+    // After user verified, try a single initial load (TripContext guards repeat)
+    if (!guestMode && userData && !tripsLoading && !loaded) {
       reloadTrips();
     }
-  }, [guestMode, userData, trips.length, tripsLoading, reloadTrips]);
+  }, [guestMode, userData, tripsLoading, reloadTrips, loaded]);
 
   const handleViewTrip = (tripId: string) => {
     console.log("Viewing trip:", tripId);
@@ -166,9 +158,19 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
 
   return (
     <SidebarProvider open defaultOpen>
-      <div className="min-h-screen flex w-full bg-background">
-        {showSidebar && <AppSidebar disableCollapse />}
-        <main className="flex-1 overflow-auto">
+      <div className="min-h-screen w-full bg-background">
+        {showSidebar && (
+          <div className="fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 z-40 border-r bg-card overflow-y-auto">
+            <AppSidebar disableCollapse />
+          </div>
+        )}
+        <main
+          className={
+            showSidebar
+              ? "flex-1 overflow-y-auto ml-64"
+              : "flex-1 overflow-y-auto"
+          }
+        >
           {/* Header */}
           <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-40">
             <div className="flex h-16 items-center gap-4 px-6">
@@ -306,7 +308,7 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="grid gap-6">
               {/* My Trips Section - Responsive Cards */}
               <div className="xl:col-span-2 space-y-4">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -358,6 +360,7 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
                         key={trip.id}
                         trip={trip}
                         onView={(id) => navigate(`/trip/${id}`)}
+                        hideEditControls
                       />
                     ))
                   ) : (
@@ -368,41 +371,6 @@ export default function Dashboard({ guestMode = false }: DashboardProps) {
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Top Destinations Sidebar */}
-              <div className="space-y-4">
-                <h3 className="text-xl font-semibold">Trending Destinations</h3>
-                <Card>
-                  <CardContent className="p-4 space-y-3">
-                    {topDestinations.map((destination, index) => (
-                      <div
-                        key={destination.name}
-                        className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-smooth"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">
-                              {destination.name}
-                            </span>
-                            {destination.trending && (
-                              <Badge variant="secondary" className="text-xs">
-                                <TrendingUp className="h-3 w-3 mr-1" />
-                                Hot
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {destination.trips} trips planned
-                          </p>
-                        </div>
-                        <div className="text-2xl font-bold text-muted-foreground">
-                          #{index + 1}
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
               </div>
             </div>
           </div>

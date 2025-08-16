@@ -4,7 +4,21 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Plus, Filter, RefreshCw, AlertCircle, Edit, Eye, Copy, Trash2, MapPin, Calendar, Users, DollarSign } from "lucide-react";
+import {
+  Search,
+  Plus,
+  Filter,
+  RefreshCw,
+  AlertCircle,
+  Edit,
+  Eye,
+  Copy,
+  Trash2,
+  MapPin,
+  Calendar,
+  Users,
+  DollarSign,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Select,
@@ -14,10 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TripCard } from "@/components/dashboard/TripCard";
-import { useTrips } from "@/context/TripContext";
+import { useTrips, Trip } from "@/context/TripContext";
+import { useAuth } from "@/context/AuthContext";
 
 export default function MyTrips() {
-  const { trips, loading, error } = useTrips();
+  const { trips, loading, error, reloadTrips } = useTrips();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -36,62 +52,79 @@ export default function MyTrips() {
 
   const handleEditTrip = (trip: Trip) => {
     // Determine which builder to use
-    const isAITrip = trip.title?.includes('AI') || 
-                     trip.sections?.some(s => s.title?.includes('AI')) ||
-                     (trip.sections?.length || 0) <= 3;
+    const isAITrip =
+      trip.title?.includes("AI") ||
+      trip.sections?.some((s) => s.title?.includes("AI")) ||
+      (trip.sections?.length || 0) <= 3;
 
     if (isAITrip) {
-      navigate('/plan-ai', { 
-        state: { 
+      navigate("/plan-ai", {
+        state: {
           editTrip: trip,
           startDate: trip.startDate,
           endDate: trip.endDate,
           destination: trip.destination,
-          suggestions: trip.suggestions || []
-        } 
+          suggestions: trip.suggestions || [],
+        },
       });
     } else {
-      navigate('/itinerary', { 
-        state: { 
+      navigate("/itinerary", {
+        state: {
           editTrip: trip,
           startDate: trip.startDate,
           endDate: trip.endDate,
           destination: trip.destination,
-          suggestions: trip.suggestions || []
-        } 
+          suggestions: trip.suggestions || [],
+        },
       });
     }
   };
 
   const handleDuplicateTrip = (trip: Trip) => {
-    const isAITrip = trip.title?.includes('AI') || 
-                     trip.sections?.some(s => s.title?.includes('AI')) ||
-                     (trip.sections?.length || 0) <= 3;
+    const isAITrip =
+      trip.title?.includes("AI") ||
+      trip.sections?.some((s) => s.title?.includes("AI")) ||
+      (trip.sections?.length || 0) <= 3;
 
     if (isAITrip) {
-      navigate('/plan-ai', { 
-        state: { 
+      navigate("/plan-ai", {
+        state: {
           duplicateTrip: trip,
           startDate: trip.startDate,
           endDate: trip.endDate,
           destination: trip.destination,
-          suggestions: trip.suggestions || []
-        } 
+          suggestions: trip.suggestions || [],
+        },
       });
     } else {
-      navigate('/itinerary', { 
-        state: { 
+      navigate("/itinerary", {
+        state: {
           duplicateTrip: trip,
           startDate: trip.startDate,
           endDate: trip.endDate,
           destination: trip.destination,
-          suggestions: trip.suggestions || []
-        } 
+          suggestions: trip.suggestions || [],
+        },
       });
     }
   };
 
-  const filteredTrips = trips.filter((trip) => {
+  // Restrict to trips created by current user only
+  const userKey = (user as any)?.id || (user as any)?._id;
+  let ownedTrips = userKey ? trips.filter((t) => t.userId === userKey) : [];
+  // Fallback: if backend not returning userId (e.g., newly created just before reload), include trips with no userId so they aren't hidden
+  if (userKey && ownedTrips.length === 0) {
+    const orphan = trips.filter((t) => !t.userId);
+    if (orphan.length) ownedTrips = orphan;
+  }
+  useEffect(() => {
+    if (user) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      console.log("MyTrips user object", user, "derived userKey:", userKey);
+    }
+  }, [user, userKey]);
+
+  const filteredTrips = ownedTrips.filter((trip) => {
     const matchesSearch =
       trip.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       trip.destination.toLowerCase().includes(searchQuery.toLowerCase());
@@ -102,15 +135,17 @@ export default function MyTrips() {
   });
 
   const handleRefresh = () => {
-    window.location.reload();
+    reloadTrips(true); // force backend reload without full page refresh
   };
 
   return (
     <SidebarProvider open defaultOpen>
-      <div className="min-h-screen flex w-full bg-background">
-        <AppSidebar disableCollapse />
+      <div className="min-h-screen w-full bg-background">
+        <div className="fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 z-40 border-r bg-card overflow-y-auto">
+          <AppSidebar disableCollapse />
+        </div>
 
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-y-auto ml-64">
           <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-40">
             <div className="flex h-16 items-center gap-4 px-6">
               <div className="flex-1 flex items-center justify-between">
@@ -152,7 +187,7 @@ export default function MyTrips() {
                     onClick={handleRefresh}
                     className="ml-2"
                   >
-                    Try Again
+                    + Try Again
                   </Button>
                 </AlertDescription>
               </Alert>
@@ -160,7 +195,7 @@ export default function MyTrips() {
 
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">
-                All Trips ({loading ? "..." : trips.length})
+                All Trips ({loading ? "..." : ownedTrips.length})
               </h2>
               <div className="flex gap-2">
                 <div className="relative">
@@ -189,7 +224,7 @@ export default function MyTrips() {
               </div>
             </div>
 
-            <div className="grid gap-4">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {loading ? (
                 <div className="text-center py-12">
                   <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-primary" />
@@ -197,7 +232,7 @@ export default function MyTrips() {
                     Loading your trips...
                   </p>
                 </div>
-              ) : trips.length === 0 ? (
+              ) : ownedTrips.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-lg text-muted-foreground mb-4">
                     You haven't created any trips yet.
@@ -212,7 +247,9 @@ export default function MyTrips() {
                 </div>
               ) : filteredTrips.length > 0 ? (
                 filteredTrips.map((trip) => (
-                  <TripCard key={trip.id} trip={trip} onView={handleViewTrip} />
+                  <div key={trip.id} className="relative">
+                    <TripCard trip={trip} onView={handleViewTrip} />
+                  </div>
                 ))
               ) : (
                 <div className="text-center py-12">

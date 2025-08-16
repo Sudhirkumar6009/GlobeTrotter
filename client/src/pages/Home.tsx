@@ -49,27 +49,153 @@ export default function Home() {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [publicTrips, setPublicTrips] = useState<Trip[]>([]);
   const [loadingPublicTrips, setLoadingPublicTrips] = useState(true);
+  const [publicTripsError, setPublicTripsError] = useState<string | null>(null);
 
+  // Robust loader with retry + timeout. Avoids infinite spinner if first attempt fails or hangs.
   useEffect(() => {
-    const loadPublicTrips = async () => {
+    const hasRunRef = { current: false } as { current: boolean };
+    if (hasRunRef.current) return; // guards against double-invoke in StrictMode
+    hasRunRef.current = true;
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const mapBackend = (backendTrips: any[]): Trip[] =>
+      backendTrips
+        .map((bt: any) => {
+          try {
+            return {
+              id: bt._id || bt.id,
+              title: bt.name || bt.title || "Untitled Trip",
+              destination: bt.destination || bt.name || bt.title || "Unknown",
+              startDate: bt.startDate
+                ? String(bt.startDate).substring(0, 10)
+                : "",
+              endDate: bt.endDate ? String(bt.endDate).substring(0, 10) : "",
+              startTime: bt.startTime,
+              endTime: bt.endTime,
+              status: ((): any => {
+                if (!bt.startDate || !bt.endDate) return "upcoming";
+                const now = new Date();
+                const s = new Date(bt.startDate);
+                const e = new Date(bt.endDate);
+                if (now < s) return "upcoming";
+                if (now > e) return "completed";
+                return "ongoing";
+              })(),
+              budget: bt.budget ?? bt.plannedBudget ?? 0,
+              plannedBudget: bt.plannedBudget,
+              participants: bt.participants || 1,
+              suggestions: Array.isArray(bt.suggestions) ? bt.suggestions : [],
+              sections: Array.isArray(bt.sections)
+                ? bt.sections.map((s: any) => ({
+                    id: s.id,
+                    title: s.title,
+                    description: s.description,
+                    dateRange: s.dateRange,
+                    budget: s.budget || 0,
+                    allDay: s.allDay,
+                    startTime: s.startTime,
+                    endTime: s.endTime,
+                    startDate: s.startDate
+                      ? String(s.startDate).substring(0, 10)
+                      : undefined,
+                    endDate: s.endDate
+                      ? String(s.endDate).substring(0, 10)
+                      : undefined,
+                  }))
+                : [],
+              createdAt: bt.createdAt || new Date().toISOString(),
+              updatedAt: bt.updatedAt,
+              coverPhoto: bt.coverPhoto,
+              image: bt.coverPhoto,
+              description: bt.description,
+              userId:
+                typeof bt.userId === "object" && bt.userId?._id
+                  ? bt.userId._id
+                  : bt.userId,
+              visibility: bt.visibility,
+            } as Trip;
+          } catch (e) {
+            console.warn("Failed to map public trip", bt, e);
+            return null;
+          }
+        })
+        .filter(Boolean) as Trip[];
+
+    const load = async () => {
+      attempts += 1;
       setLoadingPublicTrips(true);
+      setPublicTripsError(null);
       try {
-        const data = await fetchPublicTrips();
-        setPublicTrips(data);
-      } catch (error) {
-        console.error("Failed to fetch public trips:", error);
+        // Timeout after 8s to avoid stuck spinner
+        const timeout = new Promise((_, rej) =>
+          setTimeout(() => rej(new Error("timeout")), 8000)
+        );
+        const backendTrips: any[] = (await Promise.race([
+          fetchPublicTrips(),
+          timeout,
+        ])) as any[];
+        if (cancelled) return;
+        const mapped = mapBackend(backendTrips);
+        setPublicTrips(mapped);
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg =
+          err?.response?.status === 429
+            ? "Rate limited loading public trips. Please retry in a moment."
+            : err?.message === "timeout"
+            ? "Public trips request timed out."
+            : "Failed to load public trips.";
+        setPublicTripsError(msg);
+        // Backoff retry (max 2 auto retries)
+        if (attempts < 3) {
+          const delay = 500 * attempts; // simple incremental backoff
+          setTimeout(() => {
+            if (!cancelled) load();
+          }, delay);
+          return;
+        }
       } finally {
-        setLoadingPublicTrips(false);
+        if (!cancelled) setLoadingPublicTrips(false);
       }
     };
-    loadPublicTrips();
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // All trips belonging to the logged-in user
   const userTrips = useMemo(() => {
     if (!isLoggedIn || !user) return [];
-    return trips.filter((trip) => trip.userId === user.id);
+    let owned = trips.filter((trip) => trip.userId === user.id);
+    if (owned.length === 0) {
+      const orphan = trips.filter((t) => !t.userId);
+      if (orphan.length) owned = orphan; // fallback include orphan trips
+    }
+    return owned;
   }, [trips, isLoggedIn, user]);
+
+  // Show ALL public trips (any status, any owner) including freshly created ones in context
+  const homeDisplayTrips = useMemo(() => {
+    const map = new Map<string, Trip>();
+    // from fetched public list
+    publicTrips
+      .filter((t) => t.visibility === "public")
+      .forEach((t) => map.set(t.id, t));
+    // include user's context trips that are public (covers immediate post-creation before refetch)
+    trips
+      .filter((t) => t.visibility === "public")
+      .forEach((t) => {
+        if (!map.has(t.id)) map.set(t.id, t);
+      });
+    const merged = Array.from(map.values());
+    if (merged.length)
+      console.log("[Home] Merged public trips:", merged.length);
+    return merged;
+  }, [publicTrips, trips]);
 
   // Previous (completed / past end date) trips for user
   const previousTrips = useMemo(() => {
@@ -80,11 +206,7 @@ export default function Home() {
   }, [userTrips]);
 
   const filteredTrips = useMemo(() => {
-    // Merge publicTrips and userTrips, remove duplicates by id
-    const allTripsMap = new Map();
-    publicTrips.forEach((t) => allTripsMap.set(t.id, t));
-    userTrips.forEach((t) => allTripsMap.set(t.id, t));
-    let list = Array.from(allTripsMap.values());
+    let list = [...homeDisplayTrips];
 
     // Enhanced search functionality
     if (searchQuery.trim()) {
@@ -185,7 +307,7 @@ export default function Home() {
     }
 
     return list;
-  }, [publicTrips, userTrips, searchQuery, filterBy, sortBy]);
+  }, [homeDisplayTrips, searchQuery, filterBy, sortBy]);
 
   const handleLogin = () => {
     navigate("/login");
@@ -362,7 +484,7 @@ export default function Home() {
           id="all-trips"
         >
           <div className="flex items-center justify-between">
-            <h3 className="text-2xl font-bold">All Trips</h3>
+            <h3 className="text-2xl font-bold">All Public Trips</h3>
             <Button
               variant="outline"
               onClick={() => navigate(isLoggedIn ? "/new-trip" : "/login")}
@@ -374,6 +496,31 @@ export default function Home() {
             <Card className="border-dashed">
               <CardContent className="p-10 text-center">
                 <p className="text-muted-foreground">Loading public trips...</p>
+              </CardContent>
+            </Card>
+          ) : publicTripsError ? (
+            <Card className="border-dashed">
+              <CardContent className="p-10 text-center space-y-4">
+                <p className="text-destructive text-sm">{publicTripsError}</p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // force re-run loader by resetting state & calling fetch directly
+                    setPublicTripsError(null);
+                    setLoadingPublicTrips(true);
+                    fetchPublicTrips()
+                      .then((data: any[]) => {
+                        const mapped = data ? (data as any[]) : [];
+                        // reuse mapping by updating state via a mini mapper call
+                        setPublicTrips((prev) =>
+                          prev.length ? prev : (mapped as any)
+                        );
+                      })
+                      .finally(() => setLoadingPublicTrips(false));
+                  }}
+                >
+                  Retry
+                </Button>
               </CardContent>
             </Card>
           ) : filteredTrips.length === 0 ? (
@@ -454,6 +601,7 @@ export default function Home() {
                     <TripCard
                       trip={trip}
                       onView={(id) => navigate(`/trip/${id}`)}
+                      hideEditControls
                     />
                   </div>
                 ))}
@@ -490,12 +638,13 @@ export default function Home() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-7 xl:gap-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-7 xl:gap-8">
                 {previousTrips.slice(0, 6).map((trip) => (
                   <TripCard
                     key={trip.id}
                     trip={trip}
                     onView={(id) => navigate(`/trip/${id}`)}
+                    hideEditControls
                   />
                 ))}
               </div>

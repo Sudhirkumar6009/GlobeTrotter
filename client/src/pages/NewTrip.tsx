@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,9 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 
 const NewTrip = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  // If this page is reused for editing, parent can pass an existing trip id via location.state.tripId
+  const editingTripId = (location.state as any)?.tripId as string | undefined;
   const [startDate, setStartDate] = useState<Date>();
   const [endDate, setEndDate] = useState<Date>();
   const [startTime, setStartTime] = useState<string>("");
@@ -75,20 +78,35 @@ const NewTrip = () => {
 
   return (
     <SidebarProvider open defaultOpen>
-      <div className="min-h-screen flex w-full bg-background">
-        <AppSidebar disableCollapse />
-        <div className="flex-1 overflow-auto bg-gradient-to-br from-background via-background to-secondary/10">
+      <div className="min-h-screen w-full bg-background">
+        <div className="fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 z-40 border-r bg-card overflow-y-auto">
+          <AppSidebar disableCollapse />
+        </div>
+        <div className="flex-1 overflow-y-auto ml-64 bg-gradient-to-br from-background via-background to-secondary/10">
           <div className="p-6">
             {/* Header */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-6">
                 <h1 className="text-3xl font-bold text-foreground">
-                  Create a new Trip
+                  {editingTripId ? "Edit Trip Details" : "Create a New Trip"}
                 </h1>
                 <div className="text-2xl font-bold text-primary">
                   GlobeTrotter
                 </div>
               </div>
+              {editingTripId && (
+                <div className="flex gap-3 mb-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate(`/edit-trip/${editingTripId}`)}
+                  >
+                    Go to Advanced Edit
+                  </Button>
+                  <Button variant="ghost" onClick={() => navigate(-1)}>
+                    Cancel
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Trip Planning Form */}
@@ -141,14 +159,18 @@ const NewTrip = () => {
                     <div className="flex items-center gap-3">
                       <Button
                         type="button"
-                        variant={visibility === "private" ? "default" : "outline"}
+                        variant={
+                          visibility === "private" ? "default" : "outline"
+                        }
                         onClick={() => setVisibility("private")}
                       >
                         Private
                       </Button>
                       <Button
                         type="button"
-                        variant={visibility === "public" ? "default" : "outline"}
+                        variant={
+                          visibility === "public" ? "default" : "outline"
+                        }
                         onClick={() => setVisibility("public")}
                       >
                         Public

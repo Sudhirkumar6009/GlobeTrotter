@@ -55,10 +55,25 @@ const sanitizeInput = (req, res, next) => {
 app.use(helmet());
 app.use(sanitizeInput); // Use custom sanitization
 
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500 // limit each IP to 100 requests per windowMs
-}));
+// Rate limiting (configurable / disable-able for local dev)
+// Set DISABLE_RATE_LIMIT=true to turn off. Override limits with RATE_LIMIT_MAX and RATE_LIMIT_WINDOW_MS.
+if (process.env.DISABLE_RATE_LIMIT !== 'true') {
+  const windowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || `${15 * 60 * 1000}`, 10);
+  const max = parseInt(
+    process.env.RATE_LIMIT_MAX || (process.env.NODE_ENV === 'production' ? '500' : '5000'),
+    10
+  );
+  app.use(
+    rateLimit({
+      windowMs,
+      max,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: 'Too many requests, please try again later.',
+      skip: () => process.env.NODE_ENV !== 'production' && process.env.ENABLE_STRICT_RATE_LIMIT !== 'true',
+    })
+  );
+}
 
 // Connect to MongoDB
 connectDB();

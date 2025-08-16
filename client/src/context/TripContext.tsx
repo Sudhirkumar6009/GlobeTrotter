@@ -68,7 +68,8 @@ interface TripContextValue {
   error: string | null;
   getPublicTrip: (id: string) => Promise<Trip | null>;
   loadPublicTrips: () => Promise<void>;
-  reloadTrips: () => Promise<void>; // NEW
+  reloadTrips: (force?: boolean) => Promise<void>; // allow force reload
+  loaded: boolean; // indicates initial attempt completed (success OR failure)
 }
 
 const TripContext = createContext<TripContextValue | undefined>(undefined);
@@ -84,25 +85,46 @@ function computeStatus(startDate: string, endDate: string): TripStatus {
 
 export const TripProvider = ({ children }: { children: ReactNode }) => {
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false); // indicates at least one load attempt completed
+  const [lastLoadKey, setLastLoadKey] = useState<string | null>(null); // 'guest' or user.id
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, user } = useAuth();
+  // Compute a stable user key (support legacy _id from /me endpoint or id from login/signup)
+  const userKey = (user as any)?.id || (user as any)?._id || undefined;
 
   // NEW: extracted reusable loader (auth-required)
-  const reloadTrips = async () => {
-    if (!isLoggedIn) return;
+  const reloadTrips = async (force = false) => {
+    if (!isLoggedIn || !userKey) return;
     const token = getAuthTokenFromCookie();
-    if (!token) {
-      // silently skip until cookie set
-      return;
-    }
+    if (!token) return; // wait until cookie exists
+
+    // If we already loaded for this user and not forced, skip
+    if (!force && lastLoadKey === userKey) return;
+
     setLoading(true);
     setError(null);
     try {
       const backendTrips = await fetchTrips();
+      console.log(
+        "[TripContext] reloadTrips fetched",
+        backendTrips.length,
+        "trips from backend"
+      );
       const mapped: Trip[] = backendTrips.map(mapBackendTrip);
+      console.log("[TripContext] mapped trips sample:", mapped.slice(0, 3));
+      const counts = mapped.reduce(
+        (acc: any, t) => {
+          acc.total++;
+          if (t.visibility === "public") acc.public++;
+          if (!t.userId) acc.noUserId++;
+          return acc;
+        },
+        { total: 0, public: 0, noUserId: 0 }
+      );
+      console.log("[TripContext] visibility stats:", counts);
       setTrips(mapped);
+      setLastLoadKey(userKey);
     } catch (e) {
       console.error("TripContext: Failed to load trips", e);
       setError("Failed to load trips. Please check your connection.");
@@ -114,20 +136,26 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
+    // Guest mode
     if (!isLoggedIn) {
-      // guest mode → public trips
-      setLoading(true);
-      setError(null);
-      loadPublicTripsData().finally(() => {
-        setLoaded(true);
-        setLoading(false);
-      });
+      // Only (re)load public trips if we have not already loaded as guest
+      if (lastLoadKey !== "guest") {
+        setLoading(true);
+        setError(null);
+        loadPublicTripsData().finally(() => {
+          setLoaded(true);
+          setLoading(false);
+          setLastLoadKey("guest");
+        });
+      }
       return;
     }
-    // Logged in: defer until token available
-    reloadTrips();
+    // Logged in: if previously loaded as guest or another user, fetch user-owned trips
+    if (userKey && lastLoadKey !== userKey) {
+      reloadTrips(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
+  }, [isLoggedIn, userKey]);
 
   const refreshStatuses = () => {
     setTrips((prev) =>
@@ -237,7 +265,7 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
       plannedBudget: (tripInput as any).plannedBudget,
       description: (tripInput as any).description,
       visibility: (tripInput as any).visibility || "private",
-      userId: undefined,
+      userId: userKey, // Set current user as owner
     };
 
     setTrips((prev) => [optimistic, ...prev]);
@@ -298,11 +326,20 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
           image: created.coverPhoto,
           plannedBudget: (created as any).plannedBudget,
           description: created.description,
-          userId: (created as any).userId,
+          userId: (created as any).userId || userKey, // Ensure userId is set
           visibility: (created as any).visibility,
         };
         setTrips((prev) =>
           prev.map((t) => (t.id === tempId ? mappedCreated : t))
+        );
+
+        // Force reload to ensure we have the latest data from server
+        setTimeout(() => {
+          reloadTrips(true);
+        }, 500);
+        console.log(
+          "[TripContext] Trip created & inserted locally:",
+          mappedCreated
         );
       } catch (e) {
         console.error("Create trip failed, rolling back", e);
@@ -317,6 +354,10 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
   // Helper function to map backend trip to frontend Trip
   const mapBackendTrip = (bt: any): Trip => {
     const planned = bt.plannedBudget;
+    const userIdNorm =
+      typeof bt.userId === "object" && bt.userId?._id
+        ? bt.userId._id
+        : bt.userId;
     return {
       id: bt._id,
       title: bt.name,
@@ -348,7 +389,7 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
       image: bt.coverPhoto,
       plannedBudget: planned,
       description: bt.description,
-      userId: bt.userId,
+      userId: userIdNorm,
       visibility: bt.visibility,
     };
   };
@@ -363,6 +404,7 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
       const mapped = publicTrips.map(mapBackendTrip);
       setTrips(mapped);
       setError(null);
+      setLastLoadKey("guest");
     } catch (e) {
       console.error("TripContext: Failed to load public trips", e);
       setError("Failed to load public trips.");
@@ -428,10 +470,16 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
 
       // Save to localStorage
       try {
-        localStorage.setItem("globetrotter_trips", JSON.stringify(updatedTrips));
+        localStorage.setItem(
+          "globetrotter_trips",
+          JSON.stringify(updatedTrips)
+        );
         console.log("💾 Updated trips saved to localStorage");
       } catch (error) {
-        console.error("❌ Failed to save updated trips to localStorage:", error);
+        console.error(
+          "❌ Failed to save updated trips to localStorage:",
+          error
+        );
       }
 
       return updatedTrips;
@@ -449,12 +497,11 @@ export const TripProvider = ({ children }: { children: ReactNode }) => {
     error,
     getPublicTrip,
     loadPublicTrips,
-    reloadTrips, // NEW
+    reloadTrips,
+    loaded,
   };
 
-  return (
-    <TripContext.Provider value={value}>{children}</TripContext.Provider>
-  );
+  return <TripContext.Provider value={value}>{children}</TripContext.Provider>;
 };
 
 export const useTrips = () => {

@@ -7,7 +7,7 @@ export default function Footer() {
   const year = new Date().getFullYear();
   const { isLoggedIn } = useAuth();
   return (
-    <footer className="border-t backdrop-blur supports-[backdrop-filter]:bg-card/70 text-sm">
+    <footer className="relative z-40 border-t backdrop-blur supports-[backdrop-filter]:bg-card/70 text-sm">
       <div className="mx-auto w-full pr-40 pl-40">
         {isLoggedIn ? (
           <div className="w-full flex flex-col">

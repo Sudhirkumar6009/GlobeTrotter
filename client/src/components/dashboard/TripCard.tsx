@@ -31,13 +31,14 @@ interface TripCardProps {
     userId?: string;
   };
   onView: (tripId: string) => void;
+  hideEditControls?: boolean; // when true, hide edit & visibility toggle
 }
-
-export function TripCard({ trip, onView }: TripCardProps) {
+export function TripCard({ trip, onView, hideEditControls }: TripCardProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { updateTrip } = useTrips();
   const canEdit =
+    !hideEditControls &&
     user &&
     trip.userId &&
     trip.userId === user.id &&
@@ -148,8 +149,21 @@ export function TripCard({ trip, onView }: TripCardProps) {
             <Eye className="h-4 w-4 mr-2" />
             View
           </Button>
+          {canEdit && (
+            <Button
+              variant="secondary"
+              className="flex-2 bg-blue-200 hover:bg-blue-300"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/trip/${trip.id}/edit`);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="outline"
+            className="flex-3 bg-white"
             onClick={async (e) => {
               e.stopPropagation();
               const base = window.location.origin;
@@ -160,43 +174,6 @@ export function TripCard({ trip, onView }: TripCardProps) {
           >
             <LinkIcon className="h-4 w-4" />
           </Button>
-          {canEdit && (
-            <Button
-              variant="outline"
-              onClick={async (e) => {
-                e.stopPropagation();
-                const next = trip as any;
-                const newVis =
-                  (next.visibility || "private") === "private"
-                    ? "public"
-                    : "private";
-                await updateTrip(trip.id, { visibility: newVis as any });
-              }}
-              title={
-                (trip as any).visibility === "public"
-                  ? "Make Private"
-                  : "Make Public"
-              }
-            >
-              {(trip as any).visibility === "public" ? (
-                <Globe className="h-4 w-4" />
-              ) : (
-                <Shield className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-          {canEdit && (
-            <Button
-              variant="secondary"
-              className="flex-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/trip/${trip.id}/edit`);
-              }}
-            >
-              <Pencil className="h-4 w-4 mr-2" /> Edit
-            </Button>
-          )}
         </div>
       </CardContent>
     </Card>

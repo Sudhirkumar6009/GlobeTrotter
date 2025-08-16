@@ -68,11 +68,12 @@ export default function Settings() {
     ) : null;
 
   return (
-    <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
-        <AppSidebar />
-
-        <main className="flex-1 overflow-auto">
+    <SidebarProvider open defaultOpen>
+      <div className="min-h-screen w-full bg-background">
+        <div className="fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 z-40 border-r bg-card overflow-y-auto">
+          <AppSidebar disableCollapse />
+        </div>
+        <main className="flex-1 overflow-y-auto ml-64">
           <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0">
             <div className="flex h-16 items-center gap-4 px-6">
               <div className="flex-1">

@@ -72,6 +72,7 @@ export function AppSidebar({
       <Sidebar
         className={isCollapsed ? "w-16" : "w-64"}
         collapsible={disableCollapse ? "none" : "icon"}
+        positionMode="sticky"
       >
         <SidebarContent className="bg-card flex flex-col h-full">
           <div className="flex-1 overflow-y-auto ml-1">
